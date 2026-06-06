@@ -312,7 +312,10 @@
                     const controller = new AbortController();
                     const timeoutId = setTimeout(() => controller.abort(), 2000); // Quick timeout
                     
-                    const res = await fetch(`${host}/api/books`, { signal: controller.signal });
+                    const res = await fetch(`${host}/api/books`, { 
+                        signal: controller.signal,
+                        headers: { "ngrok-skip-browser-warning": "true" }
+                    });
                     clearTimeout(timeoutId);
                     
                     if (res.ok) {
@@ -450,7 +453,8 @@
                     const piResponse = await fetch(`${activePiUrl}/api/books`, {
                         method: 'POST',
                         headers: {
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'ngrok-skip-browser-warning': 'true'
                         },
                         body: JSON.stringify({
                             title: title,
