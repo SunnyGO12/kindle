@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Importador de Libros - Biblioteca Personal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #f4edd4;
+            --card-bg: #faf7ef;
+            --text-color: #2b2520;
+            --text-muted: #726559;
+            --accent-wood: #804a29;
+            --border-color: #dfd3bb;
+            --input-bg: #fdfcf8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Merriweather', Georgia, serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(#d5c8ab 0.7px, transparent 0.7px);
+            background-size: 20px 20px;
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 40px;
+            box-shadow: 0 15px 40px rgba(44, 37, 32, 0.08);
+            position: relative;
+            border-left: 10px solid var(--accent-wood); /* Spine book decoration */
+        }
+
+        h1 {
+            font-family: 'Lora', serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 5px;
+            color: var(--text-color);
+        }
+
+        .subtitle {
+            font-family: 'Lora', serif;
+            font-size: 0.85rem;
+            font-style: italic;
+            color: var(--text-muted);
+            text-align: center;
+            margin-bottom: 35px;
+        }
+
+        .dropzone {
+            border: 2px dashed var(--border-color);
+            background: var(--input-bg);
+            border-radius: 6px;
+            padding: 80px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent-wood);
+            background: #fdfbf7;
+        }
+
+        .dropzone-icon {
+            font-size: 3.5rem;
+            color: var(--accent-wood);
+            opacity: 0.85;
+        }
+
+        .dropzone-title {
+            font-family: 'Lora', serif;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .dropzone-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 4px;
+            background: var(--border-color);
+            margin-top: 25px;
+            margin-bottom: 10px;
+            border-radius: 2px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--accent-wood);
+            transition: width 0.3s ease;
+        }
+
+        .status-box {
+            font-family: 'Lora', serif;
+            font-size: 0.85rem;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .status-line {
+            line-height: 1.4;
+        }
+
+        .status-line.error {
+            color: #b71c1c;
+            font-weight: 600;
+        }
+
+        .status-line.success {
+            color: #2e7d32;
+            font-weight: 600;
+        }
+
+        /* Raspberry Pi Library Connection status/list */
+        .pi-library-panel {
+            margin-top: 25px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 20px;
+        }
+
+        .pi-library-title {
+            font-family: 'Lora', serif;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--accent-wood);
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pi-books-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .pi-book-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px 14px;
+            font-size: 0.85rem;
+        }
+
+        .pi-book-title {
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 70%;
+        }
+
+        .pi-book-pages {
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Importar Libro</h1>
+        <div class="subtitle">Arrastra un PDF para procesar y sincronizar</div>
+
+        <!-- PDF and Image Upload Dragzone (Poka-yoke) -->
+        <div class="dropzone" id="dropzone">
+            <div class="dropzone-icon">🕮</div>
+            <div class="dropzone-title">Suelte el PDF o Imagen aquí</div>
+            <div class="dropzone-hint">O haga clic para seleccionarlo (PDF, PNG, JPG, WEBP)</div>
+            <input type="file" id="fileInput" accept="application/pdf, image/jpeg, image/png, image/webp" style="display: none;">
+        </div>
+
+        <!-- Progress Tracking -->
+        <div class="progress-bar-container" id="progressContainer">
+            <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
+
+        <!-- Log Console -->
+        <div class="status-box" id="statusBox"></div>
+
+        <!-- Raspberry Pi Catalog Live View -->
+        <div class="pi-library-panel" id="libraryPanel">
+            <div class="pi-library-title">
+                <span>Libros en Kindle</span>
+                <span id="refreshBtn" style="font-size: 0.75rem; cursor: pointer; color: var(--accent-wood); font-style: italic;">[Actualizar]</span>
+            </div>
+            <div class="pi-books-list" id="piBooksList">
+                <div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem; font-style: italic;">Buscando conexión con Kindle...</div>
+            </div>
+        </div>
+
+        <!-- Connection Settings -->
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <label style="font-family: 'Lora', serif; font-size: 0.85rem; font-weight: 700; color: var(--accent-wood); display: block; margin-bottom: 8px;">URL de la Raspberry Pi API</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="piUrlInput" placeholder="http://kindle.local:5000" style="flex: 1; background: var(--input-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px 10px; font-family: inherit; font-size: 0.85rem; color: var(--text-color); outline: none;">
+                <button id="saveUrlBtn" style="background: var(--accent-wood); color: #fff; border: none; border-radius: 4px; padding: 8px 15px; font-family: 'Lora', serif; font-size: 0.85rem; font-weight: 700; cursor: pointer; transition: background 0.2s;">Guardar</button>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); font-style: italic; margin-top: 6px; line-height: 1.3;">Nota: Si usas HTTPS (ej. GitHub Pages), debes usar un túnel seguro como ngrok (https://...) para evitar el bloqueo por contenido mixto del navegador.</div>
+        </div>
+    </div>
+
+    <script>
+        // HARDCODED API KEY (Completely hidden from the UI)
+        const GEMINI_API_KEY = "AQ.Ab8RN6I_U6eMW27gnSN2b3ZOp02F9i_VVFBi94JD3o8J-FAZyg";
+
+        // Mistake-proofing (Poka-yoke): Try local mdns name first, then fallback to direct IP and localhost
+        const RASPBERRY_HOSTS = [
+            "http://kindle.local:5000",
+            "http://kindle:5000",
+            "http://10.0.0.197:5000",
+            "http://localhost:5000"
+        ];
+        
+        let activePiUrl = localStorage.getItem('activePiUrl') || RASPBERRY_HOSTS[0];
+
+        // Bind UI input element
+        document.getElementById('piUrlInput').value = activePiUrl;
+
+        document.getElementById('saveUrlBtn').addEventListener('click', () => {
+            const val = document.getElementById('piUrlInput').value.trim();
+            if (val) {
+                activePiUrl = val;
+                localStorage.setItem('activePiUrl', val);
+                addLog(`URL de la Raspberry Pi guardada: ${val}`, "info");
+                fetchPiBooks();
+            }
+        });
+
+        const statusBox = document.getElementById('statusBox');
+        function addLog(text, type = 'default') {
+            statusBox.style.display = 'flex';
+            const line = document.createElement('div');
+            line.className = `status-line ${type}`;
+            const time = new Date().toLocaleTimeString();
+            line.innerHTML = `<span>[${time}] ${text}</span>`;
+            statusBox.appendChild(line);
+            statusBox.scrollTop = statusBox.scrollHeight;
+        }
+
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        function setProgress(pct) {
+            progressContainer.style.display = 'block';
+            progressBar.style.width = `${pct}%`;
+            if (pct >= 100) {
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressBar.style.width = '0%';
+                }, 1500);
+            }
+        }
+
+        // Test which Raspberry host is reachable, and fetch books from it
+        async function fetchPiBooks() {
+            const listEl = document.getElementById('piBooksList');
+            
+            // Prioritize the currently active URL, then append default hosts
+            const hostsToTest = [activePiUrl];
+            for (const h of RASPBERRY_HOSTS) {
+                if (!hostsToTest.includes(h)) {
+                    hostsToTest.push(h);
+                }
+            }
+            
+            for (const host of hostsToTest) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 2000); // Quick timeout
+                    
+                    const res = await fetch(`${host}/api/books`, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    
+                    if (res.ok) {
+                        activePiUrl = host;
+                        document.getElementById('piUrlInput').value = host;
+                        const books = await res.json();
+                        if (books.length === 0) {
+                            listEl.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem;">La biblioteca en Kindle está vacía.</div>`;
+                        } else {
+                            listEl.innerHTML = books.map(b => `
+                                <div class="pi-book-item">
+                                    <div class="pi-book-title">${b.title}</div>
+                                    <div class="pi-book-pages">Pág. ${b.current_page + 1}/${b.total_pages}</div>
+                                </div>
+                            `).join('');
+                        }
+                        return; // Successfully connected
+                    }
+                } catch (e) {
+                    // Fail silently, try next host
+                }
+            }
+            
+            listEl.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem; font-style: italic;">No se detecta conexión con kindle (karla@kindle)</div>`;
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', fetchPiBooks);
+
+        // Upload and OCR
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropzone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleUpload);
+
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                handleUpload();
+            }
+        });
+
+        async function handleUpload() {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            statusBox.innerHTML = '';
+            addLog("Iniciando flujo de conversión...", "info");
+            addLog(`Archivo: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`, "default");
+            setProgress(15);
+
+            const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
+            const isImage = mimeType.startsWith('image/');
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+
+            reader.onload = async function() {
+                addLog(`${isImage ? "Imagen" : "PDF"} cargado localmente.`, "default");
+                const base64Data = reader.result.split(',')[1];
+                
+                if (!base64Data || base64Data.length === 0) {
+                    addLog("ERROR: Los datos base64 están vacíos.", "error");
+                    return;
+                }
+                
+                setProgress(35);
+                
+                try {
+                    addLog(`Enviando a Gemini 3.5 Flash para interpretación (${isImage ? "Análisis Imagen" : "OCR y lectura de ilustraciones"})...`, "info");
+                    
+                    let promptText = "";
+                    if (isImage) {
+                        promptText = "Analyze this image in detail. Describe exactly what is drawn or shown, read any text present in the image, and translate/explain any diagrams or charts. Produce a clean, continuous descriptive text suitable for reading on an e-ink screen.";
+                    } else {
+                        promptText = "Extract all the text of this book/document cleanly, preserving paragraphs. IF the PDF contains images, illustrations, drawings, or diagrams, describe them in detail and insert the description in brackets like '[Ilustración: Descripción de la imagen]' at the appropriate position in the text. Omit page headers/footers.";
+                    }
+
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-3.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [
+                                    {
+                                        inlineData: {
+                                            mimeType: mimeType,
+                                            data: base64Data
+                                        }
+                                    },
+                                    {
+                                        text: promptText
+                                    }
+                                ]
+                            }]
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error?.message || "Error de Gemini");
+                    }
+
+                    setProgress(75);
+                    const resData = await response.json();
+                    const extractedText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                    if (!extractedText) {
+                        console.error("Respuesta de Gemini sin texto:", resData);
+                        let reason = "Estructura de respuesta inesperada.";
+                        if (resData.candidates?.[0]?.finishReason) {
+                            reason = `Finalizado por: ${resData.candidates[0].finishReason}`;
+                        }
+                        throw new Error(`No se pudo extraer el texto. (${reason})`);
+                    }
+
+                    addLog(`Interpretación finalizada (${extractedText.length} caracteres).`, "success");
+                    addLog(`Subiendo al dispositivo Kindle en: ${activePiUrl}...`, "info");
+
+                    const title = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+
+                    const piResponse = await fetch(`${activePiUrl}/api/books`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            title: title,
+                            text: extractedText
+                        })
+                    });
+
+                    if (!piResponse.ok) {
+                        throw new Error(`Error de comunicación con Kindle: ${piResponse.statusText}`);
+                    }
+
+                    setProgress(100);
+                    addLog("¡Libro/Imagen importado y sincronizado con éxito!", "success");
+                    fetchPiBooks();
+
+                } catch (err) {
+                    addLog(`ERROR: ${err.message}`, "error");
+                } finally {
+                    fileInput.value = '';
+                }
+            };
+
+            reader.onerror = function() {
+                addLog("ERROR: Error al leer el archivo local.", "error");
+            };
+        }
+
+        // Initialize and search for active Kindle connection
+        fetchPiBooks();
+    </script>
+</body>
+</html>
