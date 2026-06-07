@@ -364,7 +364,7 @@
             if (!file) return;
 
             statusBox.innerHTML = '';
-            addLog("Iniciando conversión de libro...", "info");
+            addLog("Iniciando extracción híbrida...", "info");
             addLog(`Archivo: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`, "default");
             setProgress(5);
 
@@ -372,19 +372,50 @@
             const isImage = mimeType.startsWith('image/');
 
             try {
+                let consolidatedText = "";
+                const imagesMap = {};
                 const title = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
 
-                // Hidden canvas to render pages
+                // Hidden canvas to render illustrations
                 const canvas = document.createElement('canvas');
                 canvas.width = 400;
                 canvas.height = 300;
                 const ctx = canvas.getContext('2d');
 
-                let totalPages = 1;
-                let pdf = null;
-
                 if (isImage) {
-                    totalPages = 1;
+                    addLog("Procesando imagen...", "info");
+                    const img = new Image();
+                    const imageLoaded = new Promise((resolve, reject) => {
+                        img.onload = resolve;
+                        img.onerror = reject;
+                    });
+                    const reader = new FileReader();
+                    reader.readAsDataURL(file);
+                    reader.onload = (e) => { img.src = e.target.result; };
+                    await imageLoaded;
+                    setProgress(50);
+                    
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, 400, 300);
+                    const scale = Math.min(400 / img.width, 300 / img.height);
+                    const w = img.width * scale;
+                    const h = img.height * scale;
+                    ctx.drawImage(img, (400 - w) / 2, (300 - h) / 2, w, h);
+                    
+                    // Dither / Convert to E-Ink B&W
+                    let imgData = ctx.getImageData(0, 0, 400, 300);
+                    let data = imgData.data;
+                    for (let i = 0; i < data.length; i += 4) {
+                        let gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                        let val = gray > 128 ? 255 : 0;
+                        data[i] = val; data[i+1] = val; data[i+2] = val;
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                    
+                    const imgName = `image_0.png`;
+                    imagesMap[imgName] = canvas.toDataURL('image/png');
+                    consolidatedText = `[[IMAGE:${imgName}]]`;
+                    setProgress(80);
                 } else if (mimeType === 'application/pdf') {
                     addLog("Cargando PDF localmente...", "info");
                     const reader = new FileReader();
@@ -394,16 +425,79 @@
                     reader.readAsArrayBuffer(file);
                     const pdfData = await pdfDataPromise;
                     
-                    pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
-                    totalPages = pdf.numPages;
-                    addLog(`El PDF contiene ${totalPages} páginas.`, "info");
+                    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+                    const totalPages = pdf.numPages;
+                    addLog(`El PDF contiene ${totalPages} páginas. Analizando texto y gráficos...`, "info");
+                    
+                    let imageCounter = 0;
+                    
+                    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                        const page = await pdf.getPage(pageNum);
+                        
+                        // Extract text content of the page
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).join(" ");
+                        
+                        const operatorList = await page.getOperatorList();
+                        
+                        const hasImagesInPdf = operatorList.fnArray.some(fn => 
+                            fn === pdfjsLib.OPS.paintImageXObject || 
+                            fn === pdfjsLib.OPS.paintInlineImage ||
+                            fn === pdfjsLib.OPS.paintImageXObjectRepeat
+                        );
+
+                        if (pageText.trim().length > 0) {
+                            consolidatedText += pageText + "\n\n";
+                        }
+                        
+                        if (hasImagesInPdf || (pageText.trim().length === 0 && operatorList.fnArray.length > 5)) {
+                            // Extract page canvas as inline illustration
+                            addLog(`Extrayendo gráfico de página ${pageNum}...`, "default");
+                            const viewport = page.getViewport({ scale: 1.0 });
+                            const scale = Math.min(400 / viewport.width, 300 / viewport.height);
+                            const scaledViewport = page.getViewport({ scale: scale });
+                            
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(0, 0, 400, 300);
+                            
+                            const renderContext = {
+                                canvasContext: ctx,
+                                viewport: scaledViewport,
+                                transform: [
+                                    scale, 0, 0, scale,
+                                    (400 - viewport.width * scale) / 2,
+                                    (300 - viewport.height * scale) / 2
+                                ]
+                            };
+                            await page.render(renderContext).promise;
+                            
+                            // Convert to high-contrast E-Ink grays
+                            let imgData = ctx.getImageData(0, 0, 400, 300);
+                            let data = imgData.data;
+                            for (let i = 0; i < data.length; i += 4) {
+                                let gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+                                let val = gray > 180 ? 255 : 0;
+                                data[i] = val; data[i+1] = val; data[i+2] = val;
+                            }
+                            ctx.putImageData(imgData, 0, 0);
+                            
+                            const imgName = `page_${pageNum}_img_${imageCounter++}.png`;
+                            imagesMap[imgName] = canvas.toDataURL('image/png');
+                            
+                            consolidatedText += `\n\n[[IMAGE:${imgName}]]\n\n`;
+                        }
+                        
+                        setProgress(Math.round((pageNum / totalPages) * 70) + 10);
+                    }
                 } else {
-                    throw new Error("Formato de archivo no soportado. Debe ser PDF o Imagen.");
+                    throw new Error("Formato de archivo no soportado.");
                 }
 
-                // 1. Initialize empty book on Raspberry Pi to obtain book_id
-                addLog(`Inicializando libro en el dispositivo E-Ink...`, "info");
-                const initRes = await fetch(`${activePiUrl}/api/books/init`, {
+                addLog(`Extracción terminada (${consolidatedText.length} caracteres de texto y ${Object.keys(imagesMap).length} ilustraciones).`, "success");
+                addLog(`Enviando biblioteca a dispositivo en ${activePiUrl}...`, "info");
+                setProgress(90);
+
+                const piResponse = await fetch(`${activePiUrl}/api/books`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -411,119 +505,17 @@
                     },
                     body: JSON.stringify({
                         title: title,
-                        total_pages: totalPages
+                        text: consolidatedText,
+                        images_map: imagesMap
                     })
                 });
 
-                if (!initRes.ok) {
-                    throw new Error("No se pudo registrar el libro en la Raspberry Pi.");
-                }
-
-                const initData = await initRes.json();
-                const bookId = initData.book_id;
-                addLog(`Libro inicializado con ID: ${bookId}. Subiendo páginas...`, "success");
-
-                // 2. Process and upload pages in chunks of 15 to preserve device memory
-                const chunkSize = 15;
-                let currentChunk = [];
-                let chunkStartIndex = 0;
-
-                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-                    if (isImage) {
-                        addLog("Procesando imagen...", "default");
-                        const img = new Image();
-                        const imageLoaded = new Promise((resolve, reject) => {
-                            img.onload = resolve;
-                            img.onerror = reject;
-                        });
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = (e) => { img.src = e.target.result; };
-                        await imageLoaded;
-                        
-                        ctx.fillStyle = '#FFFFFF';
-                        ctx.fillRect(0, 0, 400, 300);
-                        const scale = Math.min(400 / img.width, 300 / img.height);
-                        const w = img.width * scale;
-                        const h = img.height * scale;
-                        const x = (400 - w) / 2;
-                        const y = (300 - h) / 2;
-                        ctx.drawImage(img, x, y, w, h);
-                        
-                        // Convert to high-contrast E-Ink grays
-                        let imgData = ctx.getImageData(0, 0, 400, 300);
-                        let data = imgData.data;
-                        for (let i = 0; i < data.length; i += 4) {
-                            let gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                            let val = gray > 128 ? 255 : 0;
-                            data[i] = val; data[i+1] = val; data[i+2] = val;
-                        }
-                        ctx.putImageData(imgData, 0, 0);
-                        currentChunk.push(canvas.toDataURL('image/png'));
-                    } else {
-                        addLog(`Procesando página ${pageNum} de ${totalPages}...`, "default");
-                        const page = await pdf.getPage(pageNum);
-                        const viewport = page.getViewport({ scale: 1.0 });
-                        const scale = Math.min(400 / viewport.width, 300 / viewport.height);
-                        const scaledViewport = page.getViewport({ scale: scale });
-                        
-                        ctx.fillStyle = '#FFFFFF';
-                        ctx.fillRect(0, 0, 400, 300);
-                        
-                        const renderContext = {
-                            canvasContext: ctx,
-                            viewport: scaledViewport,
-                            transform: [
-                                scale, 0, 0, scale,
-                                (400 - viewport.width * scale) / 2,
-                                (300 - viewport.height * scale) / 2
-                            ]
-                        };
-                        await page.render(renderContext).promise;
-                        
-                        // Convert to high-contrast E-Ink grays (slightly higher threshold for text clarity)
-                        let imgData = ctx.getImageData(0, 0, 400, 300);
-                        let data = imgData.data;
-                        for (let i = 0; i < data.length; i += 4) {
-                            let gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-                            let val = gray > 180 ? 255 : 0;
-                            data[i] = val; data[i+1] = val; data[i+2] = val;
-                        }
-                        ctx.putImageData(imgData, 0, 0);
-                        currentChunk.push(canvas.toDataURL('image/png'));
-                    }
-
-                    // If chunk is full or it's the last page, upload it immediately
-                    if (currentChunk.length === chunkSize || pageNum === totalPages) {
-                        addLog(`Subiendo páginas ${chunkStartIndex + 1} - ${pageNum}...`, "info");
-                        
-                        const chunkRes = await fetch(`${activePiUrl}/api/books/chunk`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'ngrok-skip-browser-warning': 'true'
-                            },
-                            body: JSON.stringify({
-                                book_id: bookId,
-                                start_index: chunkStartIndex,
-                                images: currentChunk
-                            })
-                        });
-
-                        if (!chunkRes.ok) {
-                            throw new Error(`Fallo al subir lote en página ${pageNum}`);
-                        }
-
-                        // Clear chunk from memory to prevent browser memory leaks
-                        currentChunk = [];
-                        chunkStartIndex = pageNum;
-                        
-                        setProgress(Math.round((pageNum / totalPages) * 90) + 5);
-                    }
+                if (!piResponse.ok) {
+                    throw new Error(`Error de comunicación con Kindle: ${piResponse.statusText}`);
                 }
 
                 setProgress(100);
-                addLog("¡Libro importado y sincronizado con éxito!", "success");
+                addLog("¡Libro importado con éxito!", "success");
                 fetchPiBooks();
 
             } catch (err) {
