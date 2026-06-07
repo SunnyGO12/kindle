@@ -369,7 +369,7 @@
             for (const host of hostsToTest) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 16000); // 8 seconds timeout for ngrok latency
+                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 8 seconds timeout for ngrok latency
                     
                     const res = await fetch(`${host}/api/books`, { 
                         signal: controller.signal,
