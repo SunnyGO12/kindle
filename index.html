@@ -203,6 +203,47 @@
             font-style: italic;
             font-size: 0.75rem;
         }
+        /* Toast notification styling */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #b71c1c;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-family: 'Lora', serif;
+            box-shadow: 0 4px 12px rgba(183, 28, 28, 0.3);
+            z-index: 1000;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: none;
+            opacity: 0;
+        }
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            pointer-events: auto;
+            opacity: 1;
+        }
+        .toast-retry {
+            background: white;
+            color: #b71c1c;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.75rem;
+            font-family: 'Lora', serif;
+            transition: opacity 0.2s;
+        }
+        .toast-retry:hover {
+            opacity: 0.9;
+        }
     </style>
 </head>
 <body>
@@ -245,6 +286,12 @@
             </div>
         </div>
 
+    </div>
+
+    <!-- Alert toast for connection error -->
+    <div id="connAlert" class="toast">
+        <span>⚠️ Error de conexión con Kindle</span>
+        <button class="toast-retry" onclick="fetchPiBooks()">Reintentar</button>
     </div>
 
     <script>
@@ -292,10 +339,26 @@
             }
         }
 
+        let toastTimeout;
+        function showConnectionAlert() {
+            const alertEl = document.getElementById('connAlert');
+            alertEl.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                alertEl.classList.remove('show');
+            }, 6000);
+        }
+
+        function hideConnectionAlert() {
+            const alertEl = document.getElementById('connAlert');
+            alertEl.classList.remove('show');
+        }
+
         // Test which Raspberry host is reachable, and fetch books from it
         async function fetchPiBooks() {
             const listEl = document.getElementById('piBooksList');
             
+            // Prioritize the currently active URL, then append default hosts
             const hostsToTest = [activePiUrl];
             for (const h of RASPBERRY_HOSTS) {
                 if (!hostsToTest.includes(h)) {
@@ -316,6 +379,7 @@
                     
                     if (res.ok) {
                         activePiUrl = host;
+                        hideConnectionAlert();
                         const books = await res.json();
                         if (books.length === 0) {
                             listEl.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem;">La biblioteca en Kindle está vacía.</div>`;
@@ -334,7 +398,13 @@
                 }
             }
             
-            listEl.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem; font-style: italic;">No se detecta conexión con kindle (karla@kindle)</div>`;
+            showConnectionAlert();
+            listEl.innerHTML = `
+                <div style="padding: 15px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                    <span style="color: #b71c1c; font-size: 0.8rem; font-weight: 600;">⚠️ No se detecta conexión con Kindle</span>
+                    <button onclick="fetchPiBooks()" style="background: var(--accent-wood); color: white; border: none; padding: 6px 12px; border-radius: 4px; font-family: 'Lora', serif; font-size: 0.8rem; cursor: pointer; box-shadow: 0 2px 6px rgba(128, 74, 41, 0.15); transition: opacity 0.2s;">Reintentar Conexión</button>
+                </div>
+            `;
         }
 
         document.getElementById('refreshBtn').addEventListener('click', fetchPiBooks);
@@ -443,8 +513,11 @@
                         const textContent = await page.getTextContent();
                         const pageText = textContent.items.map(item => item.str).join(" ");
                         
+                        // Heuristic: Check if the page contains images or objects (non-trivial)
+                        // Or if the page is mostly graphical (empty text content but has size)
                         const operatorList = await page.getOperatorList();
                         
+                        // Look for image draw operators (PaintImageXObject or PaintInlineImage)
                         const hasImagesInPdf = operatorList.fnArray.some(fn => 
                             fn === pdfjsLib.OPS.paintImageXObject || 
                             fn === pdfjsLib.OPS.paintInlineImage ||
@@ -489,6 +562,7 @@
                             const imgName = `page_${pageNum}_img_${imageCounter++}.png`;
                             imagesMap[imgName] = canvas.toDataURL('image/png');
                             
+                            // Append special image reference tag inline in text flow
                             consolidatedText += `\n\n[[IMAGE:${imgName}]]\n\n`;
                         }
                         
