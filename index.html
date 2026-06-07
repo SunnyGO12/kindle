@@ -394,6 +394,7 @@
                         return; // Successfully connected
                     }
                 } catch (e) {
+                    console.warn(`Error al intentar conectar con ${host}:`, e);
                     // Fail silently, try next host
                 }
             }
