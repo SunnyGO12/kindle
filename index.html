@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Importador de Libros - Biblioteca Personal</title>
     <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Merriweather:wght@300;400;700&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://tinsel-ending-pastrami.ngrok-free.dev/static/pdf.min.js"></script>
     <script>
-        // Set workerSrc for pdf.js
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://tinsel-ending-pastrami.ngrok-free.dev/static/pdf.worker.min.js';
     </script>
     <style>
         :root {
@@ -252,14 +251,20 @@
         // HARDCODED API KEY (Obfuscated to prevent GitHub Secret Scanning deletion)
         const GEMINI_API_KEY = atob("QVEuQWI4Uk42SVRfc0NvNTdoUlhFVHRRT0FBb0x0anFVY09xbVJERXBOcllLMzdlMDN6TGc=");
 
-        // Mistake-proofing (Poka-yoke): Try local mdns name first, then fallback to direct IP and localhost
+        // In HTTPS context (like GitHub Pages), we can only query HTTPS hosts due to Mixed Content policies.
+        // In local HTTP context (like offline hotspot), we can query local HTTP hosts.
         const RASPBERRY_HOSTS = [
             "https://tinsel-ending-pastrami.ngrok-free.dev",
             "http://kindle.local:5000",
             "http://kindle:5000",
             "http://10.0.0.197:5000",
             "http://localhost:5000"
-        ];
+        ].filter(host => {
+            if (window.location.protocol === 'https:') {
+                return host.startsWith('https:');
+            }
+            return true;
+        });
         
         let activePiUrl = RASPBERRY_HOSTS[0];
 
@@ -519,7 +524,8 @@
                 fetchPiBooks();
 
             } catch (err) {
-                addLog(`ERROR: ${err.message}`, "error");
+                console.error(err);
+                addLog(`ERROR: ${err.message}. Detalle: ${err.stack || "No stack trace available"}`, "error");
             } finally {
                 fileInput.value = '';
             }
