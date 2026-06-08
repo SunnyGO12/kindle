@@ -369,7 +369,7 @@
             for (const host of hostsToTest) {
                 try {
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 8 seconds timeout for ngrok latency
+                    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 seconds timeout for ngrok latency
                     
                     const res = await fetch(`${host}/api/books`, { 
                         signal: controller.signal,
@@ -384,12 +384,25 @@
                         if (books.length === 0) {
                             listEl.innerHTML = `<div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem;">La biblioteca en Kindle está vacía.</div>`;
                         } else {
-                            listEl.innerHTML = books.map(b => `
-                                <div class="pi-book-item">
-                                    <div class="pi-book-title">${b.title}</div>
-                                    <div class="pi-book-pages">Pág. ${b.current_page + 1}/${b.total_pages}</div>
-                                </div>
-                            `).join('');
+                            listEl.innerHTML = '';
+                            books.forEach(b => {
+                                const item = document.createElement('div');
+                                item.className = 'pi-book-item';
+                                item.innerHTML = `
+                                    <div style="display:flex; flex-direction:column; gap:2px; max-width:70%;">
+                                        <div class="pi-book-title" style="max-width:100%;">${b.title}${b.paginating ? ' <span style="font-size:0.75rem;color:var(--accent-wood); font-weight:normal;">(paginando...)</span>' : ''}</div>
+                                        <div class="pi-book-pages">Pág. ${b.current_page + 1}/${b.total_pages}</div>
+                                    </div>
+                                    <button class="delete-btn" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-family:'Lora',serif; font-size:0.8rem; padding: 4px 8px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#b71c1c'" onmouseout="this.style.color='var(--text-muted)'">Borrar</button>
+                                `;
+                                const deleteBtn = item.querySelector('.delete-btn');
+                                deleteBtn.addEventListener('click', () => {
+                                    if (confirm(`¿Estás seguro de que quieres borrar "${b.title}"?`)) {
+                                        deletePiBook(b.id);
+                                    }
+                                });
+                                listEl.appendChild(item);
+                            });
                         }
                         return; // Successfully connected
                     }
@@ -408,7 +421,28 @@
             `;
         }
 
-        document.getElementById('refreshBtn').addEventListener('click', fetchPiBooks);
+        async function deletePiBook(bookId) {
+            try {
+                const res = await fetch(`${activePiUrl}/api/books/${bookId}`, {
+                    method: 'DELETE',
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                if (res.ok) {
+                    addLog("Libro borrado con éxito.", "success");
+                    fetchPiBooks();
+                } else {
+                    throw new Error("No se pudo borrar el libro.");
+                }
+            } catch (err) {
+                console.error(err);
+                addLog(`ERROR al borrar libro: ${err.message}`, "error");
+            }
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            updateActivity();
+            fetchPiBooks();
+        });
 
         // Upload and OCR
         const dropzone = document.getElementById('dropzone');
@@ -607,7 +641,25 @@
         }
 
         // Initialize and search for active Kindle connection
-        fetchPiBooks();
+        let lastActivityTime = Date.now();
+        function updateActivity() {
+            lastActivityTime = Date.now();
+        }
+        
+        window.addEventListener('mousemove', updateActivity);
+        window.addEventListener('keydown', updateActivity);
+        window.addEventListener('click', updateActivity);
+
+        async function runPolling() {
+            if (document.visibilityState === 'visible') {
+                await fetchPiBooks();
+            }
+            const inactiveTime = Date.now() - lastActivityTime;
+            const nextInterval = inactiveTime > 30000 ? 10000 : 3000;
+            setTimeout(runPolling, nextInterval);
+        }
+
+        runPolling();
     </script>
 </body>
 </html>
